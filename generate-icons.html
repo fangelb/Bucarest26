@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!-- Obre aquest fitxer al navegador, fes clic a "Generar" i descarrega els dos PNG -->
+<html><head><meta charset="UTF-8"><title>Genera icones PWA</title></head>
+<body style="font-family:sans-serif;padding:20px;background:#070711;color:#e0e0f0">
+<h2>Generador d'icones — Bucarest '26</h2>
+<p>Fes clic per generar els PNG necessaris per la PWA:</p>
+<button onclick="generate()" style="background:#e91e8c;color:#fff;border:none;padding:12px 24px;border-radius:8px;font-size:16px;cursor:pointer">Generar icones</button>
+<div id="out" style="margin-top:20px;display:flex;gap:20px;flex-wrap:wrap"></div>
+<script>
+function drawIcon(size) {
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const ctx = c.getContext('2d');
+  const r = size * 0.19;
+  // Background
+  ctx.fillStyle = '#070711';
+  ctx.beginPath(); ctx.roundRect(0,0,size,size,r); ctx.fill();
+  // Glow
+  const g = ctx.createRadialGradient(size*.75,size*.27,0,size*.75,size*.27,size*.25);
+  g.addColorStop(0,'rgba(233,30,140,0.22)'); g.addColorStop(1,'transparent');
+  ctx.fillStyle = g; ctx.fillRect(0,0,size,size);
+  // Romanian flag
+  const fw=size*.24, fh=size*.21, fy=size*.53, gap=size*.026;
+  const fx = (size - fw*3 - gap*2) / 2;
+  ctx.fillStyle='#002B7F'; ctx.beginPath(); ctx.roundRect(fx,fy,fw,fh,size*.012); ctx.fill();
+  ctx.fillStyle='#FCD116'; ctx.beginPath(); ctx.roundRect(fx+fw+gap,fy,fw,fh,size*.012); ctx.fill();
+  ctx.fillStyle='#CE1126'; ctx.beginPath(); ctx.roundRect(fx+fw*2+gap*2,fy,fw,fh,size*.012); ctx.fill();
+  // Text B26
+  ctx.fillStyle='#ffffff'; ctx.font=`900 ${size*.28}px 'Arial Black',Arial`;
+  ctx.textAlign='center'; ctx.textBaseline='middle';
+  ctx.fillText('B26', size/2, size*.35);
+  // Pink line
+  ctx.fillStyle='#e91e8c'; ctx.fillRect(fx, size*.49, fw*3+gap*2, size*.008);
+  // Subtitle
+  ctx.fillStyle='#e91e8c'; ctx.font=`${size*.07}px Arial`;
+  ctx.letterSpacing = `${size*0.008}px`;
+  ctx.fillText('BUCAREST', size/2, size*.86);
+  return c;
+}
+
+function generate() {
+  const out = document.getElementById('out');
+  out.innerHTML = '';
+  [192, 512].forEach(sz => {
+    const c = drawIcon(sz);
+    const link = document.createElement('a');
+    link.href = c.toDataURL('image/png');
+    link.download = `icon-${sz}.png`;
+    link.innerHTML = `<div style="text-align:center"><div style="margin-bottom:8px">icon-${sz}.png</div></div>`;
+    link.appendChild(c);
+    link.style.display='block'; link.style.color='#00e5ff';
+    out.appendChild(link);
+    link.click(); // auto-descarrega
+  });
+  out.innerHTML += '<p style="color:#00e5ff;margin-top:12px">✅ Mogues els PNG descarregats a la carpeta <code>public/</code></p>';
+}
+</script>
+</body></html>

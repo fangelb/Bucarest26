@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="96" fill="#070711"/>
+  <!-- Glow -->
+  <circle cx="380" cy="140" r="120" fill="rgba(233,30,140,0.18)"/>
+  <!-- Romanian flag strips -->
+  <rect x="60" y="270" width="122" height="110" rx="6" fill="#002B7F"/>
+  <rect x="196" y="270" width="120" height="110" rx="6" fill="#FCD116"/>
+  <rect x="332" y="270" width="120" height="110" rx="6" fill="#CE1126"/>
+  <!-- Title -->
+  <text x="256" y="175" font-family="Arial Black, Arial" font-size="130" font-weight="900" fill="#ffffff" text-anchor="middle">B26</text>
+  <!-- Pink line -->
+  <rect x="60" y="250" width="392" height="4" rx="2" fill="#e91e8c"/>
+  <!-- Subtitle -->
+  <text x="256" y="440" font-family="Arial, sans-serif" font-size="38" fill="#e91e8c" text-anchor="middle" letter-spacing="4">BUCAREST</text>
+</svg>
