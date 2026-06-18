@@ -54,7 +54,7 @@ const LOCKED = [
 const LOCKED_IDS = new Set(LOCKED.map(a => a.id));
 const DAYS = { '12/06':'🟢 Divendres 12 Juny', '13/06':'🟡 Dissabte 13 Juny', '14/06':'🔴 Diumenge 14 Juny' };
 
-function settle(members, expenses) {
+function settle(members, expenses, settlements=[]) {
   const b = {};
   members.forEach(m => b[m] = 0);
   expenses.forEach(e => {
@@ -62,6 +62,11 @@ function settle(members, expenses) {
     const sh = e.amount / ps.length;
     if (b[e.payer] !== undefined) b[e.payer] += e.amount;
     ps.forEach(p => { if (b[p] !== undefined) b[p] -= sh; });
+  });
+  // Aplicar liquidacions ja registrades: qui paga redueix el seu deute, qui rep redueix el seu crèdit
+  settlements.forEach(s => {
+    if (b[s.from] !== undefined) b[s.from] += s.amount;
+    if (b[s.to]   !== undefined) b[s.to]   -= s.amount;
   });
   const cr = members.filter(m => b[m] >  0.005).map(m => ({ n:m, a:b[m]  })).sort((a,x) => x.a-a.a);
   const db = members.filter(m => b[m] < -0.005).map(m => ({ n:m, a:-b[m] })).sort((a,x) => x.a-a.a);
@@ -334,6 +339,23 @@ function AddPlaceModal({ onClose, onAdd, currentUser }) {
   );
 }
 
+// ── MODAL CONFIRMACIÓ ──
+function ConfirmModal({ title, message, confirmLabel='Eliminar', onConfirm, onCancel }) {
+  return (
+    <div style={CM.backdrop} onClick={onCancel}>
+      <div style={CM.box} onClick={e=>e.stopPropagation()}>
+        <div style={CM.icon}>⚠️</div>
+        <h3 style={CM.title}>{title}</h3>
+        <p style={CM.msg}>{message}</p>
+        <div style={CM.btns}>
+          <button style={CM.cancelBtn} onClick={onCancel}>Cancel·la</button>
+          <button style={CM.confirmBtn} onClick={onConfirm}>{confirmLabel}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── PANTALLA LOGIN ──
 function LoginScreen({ onLogin }) {
   const [name, setName] = useState('');
@@ -423,6 +445,7 @@ export default function App() {
   const [favs, setFavs]               = useState(new Set());
   const [agenda, setAgenda]           = useState(LOCKED);
   const [expenses, setExpenses]       = useState([]);
+  const [settlements, setSettlements] = useState([]);
   const [customPlaces, setCustomPlaces] = useState([]);
   const [editMem, setEditMem]         = useState(false);
   const [syncing, setSyncing]         = useState(false);
@@ -434,6 +457,8 @@ export default function App() {
   const [nEv, setNEv]     = useState({day:'12/06',time:'',title:'',notes:''});
   const [addEx, setAddEx] = useState(false);
   const [nEx, setNEx]     = useState({payer:'',amount:'',desc:'',parts:[]});
+  const [editingExpId, setEditingExpId] = useState(null);
+  const [confirmDel, setConfirmDel]     = useState(null); // {type:'expense'|'settlement', id, desc}
 
   const sync = useCallback(async (spin=true) => {
     if(spin) setSyncing(true);
@@ -442,6 +467,7 @@ export default function App() {
       if(d.members)      setMembers(d.members);
       if(d.favorites)    setFavs(new Set(d.favorites));
       if(d.expenses)     setExpenses(d.expenses);
+      if(d.settlements)  setSettlements(d.settlements);
       if(d.customPlaces) setCustomPlaces(d.customPlaces);
       if(d.agenda) setAgenda([...LOCKED,...d.agenda.filter(a=>!LOCKED_IDS.has(a.id))]);
       else         setAgenda(LOCKED);
@@ -460,7 +486,7 @@ export default function App() {
     if(!ex){
       await fbSet(`groups/${GROUP_PATH}`,{
         members:[name,'Amic 2','Amic 3','Amic 4','Amic 5','Amic 6','Amic 7'],
-        favorites:[], expenses:[], agenda:[], customPlaces:[],
+        favorites:[], expenses:[], agenda:[], customPlaces:[], settlements:[],
       });
     }
     lsSet('b26_user',name); setUser(name);
@@ -470,7 +496,7 @@ export default function App() {
   const logout = () => {
     lsSet('b26_user',null); setUser(null);
     clearInterval(poll.current);
-    setFavs(new Set()); setAgenda(LOCKED); setExpenses([]); setCustomPlaces([]);
+    setFavs(new Set()); setAgenda(LOCKED); setExpenses([]); setCustomPlaces([]); setSettlements([]);
   };
 
   useEffect(()=>{ if(user) sync(); },[]);// eslint-disable-line
@@ -507,11 +533,33 @@ export default function App() {
 
   const addExp = () => {
     if(!nEx.payer||!nEx.amount||!nEx.desc) return;
-    const e={id:`exp_${Date.now()}`,desc:nEx.desc,amount:parseFloat(nEx.amount),payer:nEx.payer,participants:nEx.parts.length?nEx.parts:[...members],date:new Date().toLocaleDateString('ca-ES'),addedBy:user};
-    const up=[...expenses,e]; setExpenses(up); push({expenses:up});
-    setNEx({payer:'',amount:'',desc:'',parts:[]}); setAddEx(false);
+    if (editingExpId) {
+      const up = expenses.map(e => e.id===editingExpId
+        ? { ...e, desc:nEx.desc, amount:parseFloat(nEx.amount), payer:nEx.payer, participants:nEx.parts.length?nEx.parts:[...members] }
+        : e
+      );
+      setExpenses(up); push({expenses:up});
+    } else {
+      const e={id:`exp_${Date.now()}`,desc:nEx.desc,amount:parseFloat(nEx.amount),payer:nEx.payer,participants:nEx.parts.length?nEx.parts:[...members],date:new Date().toLocaleDateString('ca-ES'),addedBy:user};
+      const up=[...expenses,e]; setExpenses(up); push({expenses:up});
+    }
+    setNEx({payer:'',amount:'',desc:'',parts:[]}); setAddEx(false); setEditingExpId(null);
+  };
+  const startEditExp = (exp) => {
+    setNEx({ payer:exp.payer, amount:String(exp.amount), desc:exp.desc, parts:exp.participants||[] });
+    setEditingExpId(exp.id);
+    setAddEx(true);
+  };
+  const cancelExpForm = () => {
+    setAddEx(false); setEditingExpId(null); setNEx({payer:'',amount:'',desc:'',parts:[]});
   };
   const delExp = (id) => { const up=expenses.filter(e=>e.id!==id); setExpenses(up); push({expenses:up}); };
+
+  const markSettled = (t) => {
+    const s = { id:`settle_${Date.now()}`, from:t.from, to:t.to, amount:t.amount, date:new Date().toLocaleDateString('ca-ES') };
+    const up = [...settlements, s]; setSettlements(up); push({settlements:up});
+  };
+  const delSettlement = (id) => { const up=settlements.filter(s=>s.id!==id); setSettlements(up); push({settlements:up}); };
 
   const allPlaces = [...PLACES, ...customPlaces];
   const list = allPlaces.filter(p => {
@@ -521,7 +569,7 @@ export default function App() {
     return true;
   });
 
-  const {b:bal,tx} = settle(members,expenses);
+  const {b:bal,tx} = settle(members,expenses,settlements);
   const tot = expenses.reduce((s,e)=>s+e.amount,0);
   const byDay={};
   ['12/06','13/06','14/06'].forEach(d=>{
@@ -739,12 +787,12 @@ export default function App() {
               )}
             </div>
             <div style={{display:'flex',gap:8,marginBottom:12}}>
-              <button style={{...S.dBtn,flex:1,marginBottom:0}} onClick={()=>setAddEx(!addEx)}>{addEx?'✕ Cancel·lar':'+ Afegir despesa'}</button>
+              <button style={{...S.dBtn,flex:1,marginBottom:0}} onClick={()=>{ if(addEx){cancelExpForm();} else {setAddEx(true);} }}>{addEx?'✕ Cancel·lar':'+ Afegir despesa'}</button>
               <button style={{background:'#111128',border:'1px solid #1a1a2e',borderRadius:12,padding:'0 14px',fontSize:16,color:'#555577'}} onClick={()=>sync()} title="Refresca">🔄</button>
             </div>
             {addEx&&(
               <div style={S.form}>
-                <h3 style={S.fTit}>Nova despesa</h3>
+                <h3 style={S.fTit}>{editingExpId ? '✏️ Editar despesa' : 'Nova despesa'}</h3>
                 <input style={{...S.inp,width:'100%'}} placeholder="Descripció (Sopar, Taxis, Entrades...)" value={nEx.desc} onChange={e=>setNEx({...nEx,desc:e.target.value})}/>
                 <div style={{display:'flex',gap:8,marginBottom:8}}>
                   <input style={{...S.inp,flex:1,marginBottom:0}} type="number" placeholder="Import €" value={nEx.amount} onChange={e=>setNEx({...nEx,amount:e.target.value})}/>
@@ -759,7 +807,7 @@ export default function App() {
                     </button>
                   );})}
                 </div>
-                <div style={{display:'flex',gap:8}}><button style={S.canBtn} onClick={()=>setAddEx(false)}>Cancel·la</button><button style={S.savBtn} onClick={addExp}>Afegir despesa</button></div>
+                <div style={{display:'flex',gap:8}}><button style={S.canBtn} onClick={cancelExpForm}>Cancel·la</button><button style={S.savBtn} onClick={addExp}>{editingExpId?'Guardar canvis':'Afegir despesa'}</button></div>
               </div>
             )}
             {expenses.length>0&&(
@@ -776,7 +824,10 @@ export default function App() {
                       </div>
                       <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:4}}>
                         <div style={{fontFamily:"'DM Mono',monospace",fontSize:15,fontWeight:700,color:'#00e5ff'}}>{e.amount.toFixed(2)}€</div>
-                        <button style={{background:'transparent',color:'#2a2a40',fontSize:11,padding:2}} onClick={()=>delExp(e.id)}>✕</button>
+                        <div style={{display:'flex',gap:6}}>
+                          <button style={{background:'transparent',color:'#444466',fontSize:13,padding:2}} onClick={()=>startEditExp(e)} title="Editar">✏️</button>
+                          <button style={{background:'transparent',color:'#2a2a40',fontSize:13,padding:2}} onClick={()=>setConfirmDel({type:'expense',id:e.id,desc:e.desc})} title="Eliminar">🗑️</button>
+                        </div>
                       </div>
                     </div>
                   );
@@ -801,13 +852,30 @@ export default function App() {
               <div style={{marginBottom:20}}>
                 <h3 style={S.sTit}>💳 Com liquidar els deutes</h3>
                 {tx.map((t,i)=>(
-                  <div key={i} style={{display:'flex',alignItems:'center',gap:10,background:'#111128',border:'1px solid rgba(233,30,140,0.2)',borderRadius:10,padding:'12px 14px',marginBottom:6}}>
+                  <div key={i} style={{display:'flex',alignItems:'center',gap:10,background:'#111128',border:'1px solid rgba(233,30,140,0.2)',borderRadius:10,padding:'12px 14px',marginBottom:6,flexWrap:'wrap'}}>
                     <span style={{flex:1,fontSize:13,color:'#e91e8c',fontFamily:"'DM Mono',monospace",fontWeight:500}}>{t.from}</span>
                     <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:3}}>
                       <div style={{fontSize:13,color:'#2a2a3e'}}>→</div>
                       <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:'#00e5ff',background:'rgba(0,229,255,0.08)',border:'1px solid rgba(0,229,255,0.2)',borderRadius:6,padding:'2px 9px'}}>{t.amount.toFixed(2)}€</div>
                     </div>
                     <span style={{flex:1,fontSize:13,color:'#00e5ff',fontFamily:"'DM Mono',monospace",fontWeight:500,textAlign:'right'}}>{t.to}</span>
+                    <button style={S.settleBtn} onClick={()=>markSettled(t)}>✅ Marcar com saldat</button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {settlements.length>0&&(
+              <div style={{marginBottom:20}}>
+                <h3 style={S.sTit}>✅ Pagaments saldats</h3>
+                {[...settlements].reverse().map(s=>(
+                  <div key={s.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',background:'#0d1a16',border:'1px solid rgba(0,229,255,0.15)',borderRadius:10,padding:'9px 12px',marginBottom:6}}>
+                    <div style={{fontSize:12,color:'#7777a0',fontFamily:"'DM Mono',monospace"}}>
+                      <span style={{color:'#e91e8c'}}>{s.from}</span> → <span style={{color:'#00e5ff'}}>{s.to}</span> · {s.date}
+                    </div>
+                    <div style={{display:'flex',alignItems:'center',gap:8}}>
+                      <span style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:'#00e5ff'}}>{s.amount.toFixed(2)}€</span>
+                      <button style={{background:'transparent',color:'#2a2a40',fontSize:13,padding:2}} onClick={()=>setConfirmDel({type:'settlement',id:s.id,desc:`pagament de ${s.from} a ${s.to}`})} title="Desfer">🗑️</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -819,6 +887,22 @@ export default function App() {
 
       {/* Modal afegir lloc */}
       {showAddPlace && <AddPlaceModal onClose={()=>setShowAddPlace(false)} onAdd={addCustomPlace} currentUser={user}/>}
+
+      {/* Modal confirmació eliminar */}
+      {confirmDel && (
+        <ConfirmModal
+          title={confirmDel.type==='expense' ? 'Eliminar despesa?' : 'Desfer aquest pagament?'}
+          message={confirmDel.type==='expense'
+            ? `Estàs segur que vols eliminar "${confirmDel.desc}"? Aquesta acció no es pot desfer.`
+            : `Es tornarà a comptar el ${confirmDel.desc} com a deute pendent.`}
+          onCancel={()=>setConfirmDel(null)}
+          onConfirm={()=>{
+            if(confirmDel.type==='expense') delExp(confirmDel.id);
+            else delSettlement(confirmDel.id);
+            setConfirmDel(null);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -873,6 +957,18 @@ const M = {
   addBtn:{flex:2,background:'#e91e8c',border:'none',borderRadius:10,padding:'11px',fontSize:13,color:'#fff',fontFamily:"'DM Mono',monospace",fontWeight:600},
 };
 
+// ── STYLES CONFIRM MODAL ──
+const CM = {
+  backdrop:{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:300,display:'flex',alignItems:'center',justifyContent:'center',padding:20,backdropFilter:'blur(4px)'},
+  box:{background:'#0e0e20',border:'1px solid #1a1a2e',borderRadius:18,padding:'26px 22px',width:'100%',maxWidth:340,textAlign:'center'},
+  icon:{fontSize:36,marginBottom:10},
+  title:{fontFamily:"'Syne',sans-serif",fontSize:17,fontWeight:700,color:'#f0f0ff',marginBottom:8},
+  msg:{fontSize:13,color:'#7777a0',lineHeight:1.55,marginBottom:20},
+  btns:{display:'flex',gap:10},
+  cancelBtn:{flex:1,background:'transparent',border:'1px solid #1a1a2e',borderRadius:10,padding:'11px',fontSize:13,color:'#888',fontFamily:"'DM Mono',monospace"},
+  confirmBtn:{flex:1,background:'#e91e8c',border:'none',borderRadius:10,padding:'11px',fontSize:13,color:'#fff',fontFamily:"'DM Mono',monospace",fontWeight:600},
+};
+
 // ── STYLES APP ──
 const S = {
   root:{fontFamily:"'DM Sans',sans-serif",background:'#070711',minHeight:'100dvh',color:'#e0e0f0',maxWidth:500,margin:'0 auto',paddingBottom:'env(safe-area-inset-bottom)'},
@@ -923,6 +1019,7 @@ const S = {
   canBtn:{flex:1,background:'transparent',border:'1px solid #1a1a30',borderRadius:8,padding:'9px',fontSize:12,color:'#555570',fontFamily:"'DM Mono',monospace"},
   savBtn:{flex:1,background:'#e91e8c',border:'none',borderRadius:8,padding:'9px',fontSize:12,color:'#fff',fontFamily:"'DM Mono',monospace",fontWeight:600},
   dBtn:{width:'100%',background:'transparent',border:'1px dashed #1a1a30',borderRadius:12,padding:'13px',fontSize:13,color:'#444466',fontFamily:"'DM Mono',monospace"},
+  settleBtn:{background:'rgba(0,229,255,0.1)',border:'1px solid rgba(0,229,255,0.3)',borderRadius:8,padding:'6px 12px',fontSize:11,color:'#00e5ff',fontFamily:"'DM Mono',monospace",width:'100%',marginTop:6},
   sTit:{fontFamily:"'Syne',sans-serif",fontSize:14,fontWeight:700,color:'#f0f0ff',marginBottom:10},
   empty:{textAlign:'center',padding:'40px 20px',color:'#2a2a40',fontSize:14,fontFamily:"'DM Mono',monospace"},
 };
